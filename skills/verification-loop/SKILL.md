@@ -1,150 +1,79 @@
 ---
 name: verification-loop
-description: Run a six-phase verification of a Claude Code session's work — build, type check, lint, tests with coverage, security grep, and diff review — then produce a PASS/FAIL verification report. Use when verifying work after completing a feature or refactor, before creating a PR, or when quality gates must pass.
+description: "Verify a substantial implementation, refactor or repair using the project's own checks and an honest evidence report. Use before delivery or a PR, or for 검증해줘 requests about changed software. Skip unrelated research and trivial prose edits."
 license: MIT
 metadata:
   origin: ECC
+  upstream_commit: 3f14a103a8694e51c1df9a806217a6d0b5f7a6f7
+  adaptation: Codex selective profile
 ---
 
-# Verification Loop Skill
+# Verify the requested result
 
-A comprehensive verification system for Claude Code sessions.
+Inspect the project's instructions, changed files, manifests, and CI checks.
+Choose checks for the actual change and its acceptance criteria. Reuse the
+project's installed tools and coverage requirements; do not add a test framework,
+scanner, arbitrary coverage threshold, or complete ECC plugin just to run this skill.
 
-## When to Use
+## Run applicable checks
 
-Invoke this skill:
-- After completing a feature or significant code change
-- Before creating a PR
-- When you want to ensure quality gates pass
-- After refactoring
+| Check | What to establish |
+| --- | --- |
+| Build or package | The changed application or distributable can be produced |
+| Types and static checks | Relevant compiler and type constraints still hold |
+| Lint | The project's configured style and correctness checks pass |
+| Tests and behavior | Focused tests or a meaningful smoke test cover the changed behavior |
+| Security | Relevant existing checks cover changed trust boundaries or dependencies |
+| Change review | The full requested change is present and unrelated work is preserved |
 
-## Verification Phases
+Use the project's commands, not a fixed JavaScript checklist. A Python utility,
+Roblox module, desktop app, and documentation-only change need different checks.
+For a small reversible change, existing checks or direct inspection may suffice.
+Mark an inapplicable check N/A with its reason. Mark an unavailable or unexecuted
+check NOT RUN; never turn a skipped command into PASS.
 
-### Phase 1: Build Verification
-```bash
-set -o pipefail  # report the build's exit status, not tail's
-# Check if project builds
-npm run build 2>&1 | tail -20
-# OR
-pnpm build 2>&1 | tail -20
+Preserve native command exit codes. On Windows, capture `$LASTEXITCODE`
+immediately, before summarizing output or running another native command. For
+example, replace the test command below with the project's actual command:
+
+```powershell
+$checkOutput = & python -m unittest discover -s tests 2>&1
+$checkExit = $LASTEXITCODE
+$checkOutput | Select-Object -Last 40
+if ($checkExit -ne 0) { exit $checkExit }
 ```
 
-If build fails, STOP and fix before continuing.
+Avoid Bash-only `pipefail`, `tail`, `sed`, or `/dev/null` examples in native
+PowerShell. Retain enough failure output to diagnose the check. Fix failures
+caused by the requested work and rerun the affected checks; repeat broader tests
+only when new edits or unresolved evidence justify it. Never suppress a failure
+to obtain a green report.
 
-### Phase 2: Type Check
-```bash
-set -o pipefail
-# TypeScript projects
-npx --no-install tsc --noEmit 2>&1 | sed -n '1,30p'
+## Review scope and target behavior
 
-# Python projects
-pyright . 2>&1 | sed -n '1,30p'
-```
+In Git, start with `git status --short`, inspect both unstaged and staged diffs,
+and inspect relevant untracked files. Use an explicitly known task or PR base
+when needed; `HEAD~1` is not a reliable baseline for arbitrary work. Keep unrelated
+user changes intact. Outside a Git repository, review the actual output files
+and available source snapshots instead.
 
-Report all type errors. Fix critical ones before continuing.
+Scope security inspection to the change and relevant existing tools. Redact any
+secret findings; report the path and category without printing the secret.
+Pattern searches alone do not establish a security audit.
 
-### Phase 3: Lint Check
+If acceptance requires a running application, editor, browser, device, or remote
+environment, record that target check separately from local checks. A successful
+compile does not prove the application works in its target. Perform already
+authorized target checks when available; do not deploy, upload, publish, or alter
+an account without authorization for that action.
 
-Use `sed` to limit displayed output while consuming the whole stream. This keeps a
-successful linter from failing on SIGPIPE when `pipefail` is enabled.
-```bash
-set -o pipefail
-# JavaScript/TypeScript
-npm run lint 2>&1 | sed -n '1,30p'
+## Report the evidence
 
-# Python
-ruff check . 2>&1 | sed -n '1,30p'
-```
+Give a concise result in the user's language: which checks passed, what failed
+or was not run, and any material limitation. Include command or artifact evidence
+where it helps review. Report target acceptance as VERIFIED, FAILED, NOT RUN, or
+N/A with the environment and evidence when applicable. Do not claim complete
+verification while a required check remains unexecuted.
 
-### Phase 4: Test Suite
-```bash
-set -o pipefail
-# Run tests with coverage
-npm run test -- --coverage 2>&1 | tail -50
-
-# Check coverage threshold
-# Target: 80% minimum
-```
-
-Report:
-- Total tests: X
-- Passed: X
-- Failed: X
-- Coverage: X%
-
-### Phase 5: Security Scan
-```bash
-# Check for secrets
-grep -rn "sk-" --include="*.ts" --include="*.js" . 2>/dev/null | head -10
-grep -rn "api_key" --include="*.ts" --include="*.js" . 2>/dev/null | head -10
-
-# Check for console.log
-grep -rn "console.log" --include="*.ts" --include="*.tsx" src/ 2>/dev/null | head -10
-```
-
-### Phase 6: Diff Review
-```bash
-# Show what changed
-git diff --stat
-git diff HEAD~1 --name-only
-```
-
-Review each changed file for:
-- Unintended changes
-- Missing error handling
-- Potential edge cases
-
-## Target Acceptance
-
-When the requested outcome requires deployment or target-environment verification,
-report target acceptance separately from local checks. Record the environment and
-installed version when known, the evidence, and the next permitted check or precise
-access dependency. Passing local checks, review, merge, or release does not establish
-target acceptance. Report VERIFIED or FAILED for an executed target check, with its evidence.
-Do not access production or make external changes without authorization. For
-local-only tasks, mark target acceptance as not applicable.
-
-For example: local checks PASS; staging verification NOT PERFORMED (no access);
-next step: an authorized maintainer runs the staging smoke test.
-
-## Output Format
-
-After running all phases, produce a verification report:
-
-```
-VERIFICATION REPORT
-==================
-
-Build:     [PASS/FAIL]
-Types:     [PASS/FAIL] (X errors)
-Lint:      [PASS/FAIL] (X warnings)
-Tests:     [PASS/FAIL] (X/Y passed, Z% coverage)
-Security:  [PASS/FAIL] (X issues)
-Diff:      [X files changed]
-
-Overall:   [READY/NOT READY] for PR
-Target:    [VERIFIED/FAILED/NOT PERFORMED/NOT APPLICABLE] (environment/version, evidence)
-Next permitted step: [check or access dependency; none if complete/not applicable]
-
-Issues to Fix:
-1. ...
-2. ...
-```
-
-## Continuous Mode
-
-For long sessions, run verification every 15 minutes or after major changes:
-
-```markdown
-Set a mental checkpoint:
-- After completing each function
-- After finishing a component
-- Before moving to next task
-
-Run: /verify
-```
-
-## Integration with Hooks
-
-This skill complements PostToolUse hooks but provides deeper verification.
-Hooks catch issues immediately; this skill provides comprehensive review.
+Source and license: [ECC upstream skill](https://github.com/affaan-m/ECC/blob/3f14a103a8694e51c1df9a806217a6d0b5f7a6f7/skills/verification-loop/SKILL.md),
+adapted for this Codex profile. The original MIT notice is in [LICENSE](LICENSE).

@@ -1,0 +1,3 @@
+interface:
+  display_name: "ECC Verification Loop"
+  short_description: "Verify changes with project-specific checks"

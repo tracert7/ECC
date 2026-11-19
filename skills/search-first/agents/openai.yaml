@@ -1,0 +1,3 @@
+interface:
+  display_name: "ECC Search First"
+  short_description: "Find reusable tools before writing new code"
